@@ -1,0 +1,310 @@
+/*
+ * Filename: /Users/jpottle776/www/0_MEAN_STACK/Exercise_02_01_01/index.js
+ * Path: /Users/jpottle776/www/0_MEAN_STACK/Exercise_02_01_01
+ * Created Date: Thursday, January 17th 2019, 1:50:02 pm
+ * Author: Jamin Pottle
+ * 
+ * Making server with node express
+ */
+
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+var authenticator = require('./authenticator.js');
+var config = require('./config.json');
+var url = require('url');
+var querystring = require('querystring');
+var async = require('async');
+var storage = require('./storage.js');
+storage.connect();
+
+app.use(require('cookie-parser')());
+
+app.use(bodyParser.json());
+
+app.use(express.static(__dirname + '/public'));
+
+app.set('view engine', 'ejs');
+
+// timer for deleting friends and refreshing cache
+setInterval(function() {
+    if (storage.connected()) {
+        console.log("Clearing MongoDB Cache.");
+        storage.deleteFriends();
+    }
+}, 1000 * 60 * 5);
+
+//*This route will get a request token and redirect the client to the Twitter sign in
+app.get('/auth/twitter', authenticator.redirectToTwitterLoginPage);
+
+// used for tweeting with api
+app.get('/tweet', function (req, res) {
+    var credentials = authenticator.getCredentials();
+    if (!credentials.access_token || !credentials.access_token_secret) {
+        return res.sendStatus(418);
+    }
+    var url = "https://api.twitter.com/1.1/statuses/update.json";
+    authenticator.post(url, credentials.access_token, credentials.access_token_secret, {
+            status: "I'd rather be coding...that's why I'm tweeting from code"
+        },
+        function (error, data) {
+            if (error) {
+                return res.sendStatus(402).send(error);
+            }
+            res.send("Tweet Successful");
+        }
+    );
+});
+
+// searchs specific users tweets
+app.get('/search', function (req, res) {
+    var credentials = authenticator.getCredentials();
+    if (!credentials.access_token || !credentials.access_token_secret) {
+        return res.sendStatus(410);
+    }
+    var url = "https://api.twitter.com/1.1/search/tweets.json";
+    var query = querystring.stringify({
+        q: 'Tesla'
+    });
+    url += '?' + query;
+    authenticator.get(url, credentials.access_token, credentials.access_token_secret,
+        function (error, data) {
+            if (error) {
+                return res.sendStatus(426).send(error);
+            }
+            res.send(data);
+        }
+    )
+});
+
+// looks up friends
+app.get('/friends', function (req, res) {
+    var credentials = authenticator.getCredentials();
+    if (!credentials.access_token || !credentials.access_token_secret) {
+        return res.sendStatus(410);
+    }
+    var url = "https://api.twitter.com/1.1/friends/list.json";
+    if (req.query.cursor) {
+        url += '?' + querystring.stringify({
+            cursor: req.query.cursor
+        })
+    }
+    authenticator.get(url, credentials.access_token, credentials.access_token_secret,
+        function (error, data) {
+            if (error) {
+                return res.sendStatus(405).send(error);
+            }
+            return res.send(data);
+        }
+    );
+});
+
+// routes to all friends and shows information
+app.get('/allfriends', function (req, res) {
+    renderMainPageFromTwitter(req, res);
+});
+
+//route for root if !credentials then you are rerouted to login page
+app.get('/', function(req, res){
+    var credentials = authenticator.getCredentials();
+    if (!credentials.access_token || !credentials.access_token_secret) {
+        return res.redirect('login');
+    }
+    if (!storage.connected()) {
+        console.log("Loading friends from Twitter.");
+        return renderMainPageFromTwitter(req, res);
+    }
+    // if statement not required do to trapping of previous if statement
+    console.log("Loading friends from MongoDB.");
+    storage.getFriends(credentials.twitter_id, function(err, friends) {
+        if (err) {
+            return res.sendStatus(500).send(err);
+        }
+        if (friends.length > 0) {
+            console.log("Friends successfully loaded from MongoDB.");
+            friends.sort(function(a, b) {
+                return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+            });
+            res.render('index', { friends: friends });
+        } else {
+            console.log("Loading friends from Twitter.");
+            renderMainPageFromTwitter(req, res);
+        }
+    });
+});
+
+//renders the friends page to show users friends
+function renderMainPageFromTwitter(req, res) {
+    var credentials = authenticator.getCredentials();
+    //*using async package to create async waterfall to control flow of control
+    async.waterfall([
+    //*get our friends ids
+    function (callback) {
+        var cursor = -1;
+        var ids = [];
+        async.whilst(function () { //*whilst - returns true or false - 'condition'
+            return cursor != 0;
+        }, function (callback) { //*for what you want it to do - code executed
+            var url = "https://api.twitter.com/1.1/friends/ids.json";
+            url += "?" + querystring.stringify({
+                user_id: credentials.twitter_id,
+                cursor: cursor
+            });
+            authenticator.get(url, credentials.access_token, credentials.access_token_secret,
+                function (error, data) {
+                    if (error) {
+                        return res.sendStatus(410).send(error);
+                    }
+                    data = JSON.parse(data);
+                    cursor = data.next_cursor_str;
+                    ids = ids.concat(data.ids);
+                    callback();
+                });
+        }, function (error) {
+            if (error) {
+                return res.status(500).send(error);
+            }
+            callback(null, ids);
+        });
+    },
+    //*look up friends data
+    function (ids, callback) {
+        var getHundredIds = function (i) {
+            return ids.slice(100 * i, Math.min(ids.length, 100 * (i + 1)));
+        };
+        var requestsNeeded = Math.ceil(ids.length / 100);
+        async.times(requestsNeeded, function (n, next) {
+                var url = "https://api.twitter.com/1.1/users/lookup.json";
+                url += "?" + querystring.stringify({
+                    user_id: getHundredIds(n).join(",")
+                });
+                authenticator.get(url, credentials.access_token,credentials.access_token_secret,
+                function (error, data) {
+                    if (error) {
+                        return res.sendStatus(400).send(error);
+                    }
+                    var friends = JSON.parse(data);
+                    next(null, friends);
+                });
+            },
+        function (error, friends) {
+            friends = friends.reduce(function (previousValue, currentValue, currentIndex,array){
+                return previousValue.concat(currentValue);
+            }, []);
+            friends.sort(function (a, b) {
+                return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+            });
+            // makes getting friend information more efficent
+            friends = friends.map(function(friend) {
+                return {
+                    twitter_id: friend.id_str,
+                    for_user: credentials.twitter_id,
+                    name: friend.name,
+                    screen_name: friend.screen_name,
+                    location: friend.location, 
+                    profile_image_url: friend.profile_image_url
+                }
+            });
+            res.render('index', {friends: friends});
+            if (storage.connected) {
+                storage.insertFriends(friends);
+            }
+        });
+    }
+    ]);
+}
+
+// route for login page
+app.get('/login', function (req, res) {
+    if (storage.connected()) {
+        console.log("removing friends from Mongo on login");
+        storage.deleteFriends();
+    }
+    res.render('login.ejs');
+});
+
+// logs user out so you can clear credentials
+app.get('/logout', function (req, res) {
+    authenticator.clearCredentials();
+    res.clearCookie('twitter_id');
+    if (storage.connected()) {
+        console.log("removing friends from Mongo on logout");
+        storage.deleteFriends();
+    }
+    res.redirect('/login');
+});
+
+/* makes sure user is logged in */
+function ensureLoggedIn(req, res, next) {
+    var credentials = authenticator.getCredentials();
+    if (!credentials.access_token || !credentials.access_token_secret || !credentials.twitter_id) {
+        return res.sendStatus(401);
+    }
+    res.cookie('twitter_id', credentials.twitter_id, { httponly: true });
+    next();
+}
+
+// ":" means it a parameter (:uid is parameter in url accessed as req.params.uid)
+app.get('/friends/:uid/notes', ensureLoggedIn, function(req, res) {
+    var credentials = authenticator.getCredentials();
+    storage.getNotes(credentials.twitter_id, req.params.uid, function(err, notes) {
+        if (err) {
+            return res.sendStatus(500).send(err);
+        }
+        res.send(notes);
+    });
+});
+
+// adds note to mongodb
+app.post('/friends/:uid/notes', ensureLoggedIn, function(req, res, next) {
+    storage.insertNote(req.cookies.twitter_id, req.params.uid, req.body.content, function(err, note) {
+        if (err) {
+            return res.sendStatus(500).send(err);
+        }
+        res.send(note);
+    });
+});
+
+// for updating note in mongodb
+app.put('/friends/:uid/notes/:noteid', ensureLoggedIn, function(req, res) {
+    storage.updateNote(req.params.noteid, req.cookies.twitter_id, req.body.content, function(err, note) {
+        if (err) {
+            return res.sendStatus(500).send(err);
+        }
+        res.send({
+            _id: note._id,
+            content: note.content
+        });
+    });
+});
+
+// deletes note from mongodb
+app.delete('/friends/:uid/notes/:noteid', ensureLoggedIn, function(req, res) {
+    storage.deleteNote(req.params.noteid, req.cookies.twitter_id, function(err, note) {
+        if (err) {
+            return res.sendStatus(500).send(err);
+        }
+        res.sendStatus(200);
+    });
+});
+
+app.get(url.parse(config.oauth_callback).path, function (req, res) { //*gets what is in url
+    authenticator.authenticate(req, res, function (err) { //*adds call back to check errors
+        if (err) {
+            res.redirect('/login');
+        } else {
+            res.redirect('/');
+        }
+    });
+});
+
+//TODO: for looking people up on twitter
+app.get('/lookup', function(req, res) {
+   res.render('lookup'); 
+});
+
+// runs server
+app.listen(config.port, function () { //*builds server to listen on port 8080
+    console.log("Server listening on localhost port: %s", config.port);
+    console.log('OAuth callback: ' + url.parse(config.oauth_callback).hostname + url.parse(config.oauth_callback).path);
+});

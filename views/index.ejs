@@ -1,0 +1,71 @@
+<!--
+Filename: /Users/jpottle776/www/0_MEAN_STACK/Exercise_02_03_01/views/index.ejs
+Path: /Users/jpottle776/www/0_MEAN_STACK/Exercise_02_03_01
+Created Date: Monday, February 11th 2019, 2:23:12 pm
+Author: Jamin Pottle
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Friends</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.0/css/bootstrap.min.css" integrity="sha384-PDle/QlgIONtM1aqA2Qemk5gPOE7wFq8+Em+G/hmo5Iq0CCmYZLv3fVRDJ4MMwEA"
+  crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+  <script type="text/javascript" src="main.js"></script>
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-lg navbar-light bg-light">
+    <a class="navbar-brand" href="#">Twitter REST API</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav"
+      aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav">
+        <li class="nav-item active">
+          <a class="nav-link" href="/">Notes<span class="sr-only">(current)</span></a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/lookup">Lookup</a>
+        </li>
+        <li class="nav-item">
+          <a href="/logout" class="nav-link">Logout</a>
+        </li>
+        
+      </ul>
+    </div>
+
+  </nav>
+  <div id="wrapper">
+    
+    <div id="friends-column" class="column">
+      <h1>Your Friends</h1>
+      <!-- Friends will be dynamically loaded with EJS -->
+      <ul id="friends">
+        <% friends.forEach(function(friend){ %>
+        <li uid="<%= friend.twitter_id %>" class="friend">
+          <img class="profile-image" src="<%= friend.profile_image_url %>" alt="">
+          <p><span class="name">
+              <%= friend.name %></span> <span class="screen-name">
+              <%= friend.screen_name %></span></p>
+          <p class="location">
+            <%= friend.location %>
+          </p>
+        </li>
+        <% }); %>
+
+      </ul>
+    </div>
+    <div id="notes-column" class="column">
+      <h1>Information</h1>
+      <ul id="notes"></ul>
+    </div>
+  </div>
+</body>
+
+</html>
