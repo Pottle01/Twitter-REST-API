@@ -17,6 +17,8 @@ var querystring = require('querystring');
 var async = require('async');
 var storage = require('./storage.js');
 
+var userSearch = require('./public/lookup');
+
 storage.connect();
 
 app.use(require('cookie-parser')());
@@ -307,7 +309,7 @@ app.get('/lookup', function(req, res) {
     }
     var url = "https://api.twitter.com/1.1/users/search.json";
     var query = querystring.stringify({
-        q: 'pottle'
+        q: userSearch.searchUser()
     });
     url += '?' + query;
     authenticator.get(url, credentials.access_token, credentials.access_token_secret,
